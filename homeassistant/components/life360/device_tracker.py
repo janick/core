@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from contextlib import suppress
 from typing import Any, cast
 
 from homeassistant.components.device_tracker import SourceType
@@ -111,6 +112,9 @@ class Life360DeviceTracker(CoordinatorEntity, TrackerEntity):
         self._attr_entity_picture = self._data.entity_picture
 
         self._prev_data = self._data
+        if (address := self._data.address) == self._data.place:
+            address = None
+        self._addresses = [address]
 
     @property
     def _options(self) -> Mapping[str, Any]:
@@ -158,6 +162,20 @@ class Life360DeviceTracker(CoordinatorEntity, TrackerEntity):
                 # Overwrite new location related data with previous values.
                 for attr in _LOC_ATTRS:
                     setattr(self._data, attr, getattr(self._prev_data, attr))
+                self._addresses = []
+
+            else:
+                if (address := self._data.address) == self._data.place:
+                    address = None
+                if last_seen != prev_seen:
+                    if address not in self._addresses:
+                        self._addresses = [address]
+                elif self._data.address != self._prev_data.address:
+                    if address not in self._addresses:
+                        if len(self._addresses) < 2:
+                            self._addresses.append(address)
+                        else:
+                            self._addresses = [address]
 
             self._prev_data = self._data
 
@@ -232,8 +250,18 @@ class Life360DeviceTracker(CoordinatorEntity, TrackerEntity):
     @property
     def extra_state_attributes(self) -> Mapping[str, Any] | None:
         """Return entity specific state attributes."""
-        attrs = {}
-        attrs[ATTR_ADDRESS] = self._data.address
+        address1: str | None = None
+        address2: str | None = None
+        with suppress(IndexError):
+            address1 = self._addresses[0]
+            address2 = self._addresses[1]
+        if address1 and address2:
+            address: str | None = " / ".join(sorted([address1, address2]))
+        else:
+            address = address1 or address2
+
+        attrs: dict[str, Any] = {}
+        attrs[ATTR_ADDRESS] = address
         attrs[ATTR_AT_LOC_SINCE] = self._data.at_loc_since
         attrs[ATTR_BATTERY_CHARGING] = self._data.battery_charging
         attrs[ATTR_DRIVING] = self.driving
